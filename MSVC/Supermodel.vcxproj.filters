@@ -368,8 +368,8 @@
     <ClCompile Include="..\Src\OSD\SDL\SDLInputSystem.cpp">
       <Filter>Source Files\OSD\SDL</Filter>
     </ClCompile>
-    <ClCompile Include="..\Src\OSD\SDL\Thread.cpp">
-      <Filter>Source Files\OSD\SDL</Filter>
+    <ClCompile Include="..\Src\OSD\Thread.cpp">
+      <Filter>Source Files\OSD</Filter>
     </ClCompile>
     <ClCompile Include="..\Src\OSD\Windows\DirectInputSystem.cpp">
       <Filter>Source Files\OSD\Windows</Filter>
@@ -538,6 +538,9 @@
     </ClCompile>
     <ClCompile Include="..\Src\Util\ByteSwap.cpp">
       <Filter>Source Files\Util</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Src\Version.cpp">
+      <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\Src\GameLoader.cpp">
       <Filter>Source Files</Filter>

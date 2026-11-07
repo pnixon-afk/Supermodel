@@ -74,7 +74,7 @@ Anyways credit to R. Belmont and ElSemi for the code, and for being awesome emul
 
 #include "Supermodel.h"
 #include "SCSPDSP.h"
-#include "OSD/Thread.h"
+#include <mutex>
 
 
 #include <cstdio>
@@ -112,7 +112,7 @@ static constexpr double srate=44100;
 #define DWORD UINT32
 #endif
 
-static CMutex *MIDILock;	// for safe access to the MIDI FIFOs
+static std::mutex MIDILock;	// for safe access to the MIDI FIFOs
 static int (*Run68kCB)(int cycles);
 static void (*Int68kCB)(int irq);
 
@@ -264,14 +264,23 @@ void CheckPendingIRQ()
 {
 	_SCSP *chip = SCSPs;	// only the master SCSP drives the 68K interrupt lines
 
+	// The main thread pushes MIDI input (SCSP_MidiIn), so sample the FIFO state under the lock.
+	// No caller holds MIDILock here.
+	if (s_multiThreaded)
+		MIDILock.lock();
+	bool midiInPending = MidiW != MidiR;
+	bool midiOutEmpty = MidiOutFill == 0;
+	if (s_multiThreaded)
+		MIDILock.unlock();
+
 	// MIDI input interrupt (bit 3) is level triggered: pending while the input FIFO holds data
-	if (MidiW != MidiR)
+	if (midiInPending)
 		chip->data[0x20 / 2] |= 0x0008;
 	else
 		chip->data[0x20 / 2] &= ~0x0008;
 
 	// MIDI output interrupt (bit 9): pending while the output FIFO is empty
-	if (MidiOutFill == 0)
+	if (midiOutEmpty)
 		chip->data[0x20 / 2] |= 0x0200;
 	else
 		chip->data[0x20 / 2] &= ~0x0200;
@@ -504,13 +513,6 @@ Result SCSP_Init(const Util::Config::Node &config, int n)
 	SampleCounter = 0;
 	lastdiff = 0;
 
-	// MIDI FIFO mutex
-	MIDILock = CThread::CreateMutex();
-	if (NULL == MIDILock)
-	{
-		return ErrorLog("Unable to create MIDI mutex!");
-	}
-
 	return Result::OKAY;
 }
 
@@ -676,7 +678,7 @@ static UINT16 SCSP_ReadCommonReg(int reg, bool popMidi)
 			return 0x0900;		// slave: input and output FIFO empty
 
 		if (s_multiThreaded)
-			MIDILock->Lock();
+			MIDILock.lock();
 
 		UINT16 v = 0;
 		if (MidiOutFill >= MIDI_OUT_FIFO_SIZE)	v |= 0x1000;	// MOFULL
@@ -696,7 +698,7 @@ static UINT16 SCSP_ReadCommonReg(int reg, bool popMidi)
 		}
 
 		if (s_multiThreaded)
-			MIDILock->Unlock();
+			MIDILock.unlock();
 
 		if (popMidi)
 			CheckPendingIRQ();
@@ -1312,7 +1314,7 @@ void SCSP_MidiIn(BYTE val)
 	 * MIDI FIFO critical section
 	 */
 	if (s_multiThreaded)
-		MIDILock->Lock();
+		MIDILock.lock();
 
 	if (((MidiW + 1) & MIDI_STACK_SIZE_MASK) == MidiR)
 	{
@@ -1331,7 +1333,7 @@ void SCSP_MidiIn(BYTE val)
 	}
 
 	if (s_multiThreaded)
-		MIDILock->Unlock();
+		MIDILock.unlock();
 }
 void SCSP_MidiOutW(BYTE val)
 {
@@ -1339,7 +1341,7 @@ void SCSP_MidiOutW(BYTE val)
 	 * MIDI FIFO critical section
 	 */
 	if (s_multiThreaded)
-		MIDILock->Lock();
+		MIDILock.lock();
 
 	if (MidiOutFill < MIDI_OUT_FIFO_SIZE)
 	{
@@ -1351,7 +1353,7 @@ void SCSP_MidiOutW(BYTE val)
 	}
 
 	if (s_multiThreaded)
-		MIDILock->Unlock();
+		MIDILock.unlock();
 }
 
 void SCSP_SetMidiOutCallback(void (*callback)(void *context, UINT8 data), void *context)
@@ -1371,14 +1373,14 @@ unsigned char SCSP_MidiOutR()
 	 * MIDI FIFO critical section
 	 */
 	if (s_multiThreaded)
-		MIDILock->Lock();
+		MIDILock.lock();
 
 	val=MidiOutStack[MidiOutR++];
 	MidiOutR&=15;
 	--MidiOutFill;
 
 	if (s_multiThreaded)
-		MIDILock->Unlock();
+		MIDILock.unlock();
 
 	return val;
 }
@@ -1667,6 +1669,5 @@ void SCSP_SetBuffers(float *leftBufferPtr, float *rightBufferPtr, float* leftRea
 }
 void SCSP_Deinit(void)
 {
-	delete MIDILock;
-	MIDILock = NULL;
 }
+
